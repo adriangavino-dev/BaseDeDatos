@@ -293,6 +293,45 @@ table.result tbody tr:hover td { background: #f9efe2; }
 table.result td.null { color: #c0b3a4; font-style: italic; }
 .rownum { color: var(--muted); text-align: right; user-select: none; font-variant-numeric: tabular-nums; }
 
+/* ---------- View toggle (Tabla / JSON) ---------- */
+.view-toggle {
+  margin-left: auto;
+  display: inline-flex;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--bg);
+}
+.view-toggle button {
+  font-family: inherit;
+  font-size: .73rem;
+  font-weight: 600;
+  padding: 4px 12px;
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  transition: background .15s, color .15s;
+  letter-spacing: .02em;
+}
+.view-toggle button + button { border-left: 1px solid var(--line); }
+.view-toggle button.active {
+  background: var(--wine);
+  color: #fff;
+}
+.view-toggle button:not(.active):hover { background: #f6efe6; color: var(--ink); }
+
+pre.json-view {
+  margin: 0;
+  padding: 18px;
+  font-family: var(--mono);
+  font-size: .8rem;
+  line-height: 1.6;
+  white-space: pre;
+  color: #41382f;
+  tab-size: 2;
+}
+
 pre.explain {
   margin: 0;
   padding: 18px;

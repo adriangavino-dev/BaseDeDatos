@@ -57,6 +57,42 @@ function insertAtCursor(text) {
 }
 
 // --------------------------------------------------------------------------
+// Vista: tabla vs JSON
+// --------------------------------------------------------------------------
+let lastData = null;
+let viewMode = "table";
+
+function setViewMode(mode) {
+  viewMode = mode;
+  const btnTable = $("#btn-view-table");
+  const btnJson = $("#btn-view-json");
+  if (btnTable) btnTable.classList.toggle("active", mode === "table");
+  if (btnJson) btnJson.classList.toggle("active", mode === "json");
+  if (lastData) renderResult(lastData, true);
+}
+
+function buildViewToggle() {
+  const wrap = document.createElement("span");
+  wrap.className = "view-toggle";
+
+  const btnTable = document.createElement("button");
+  btnTable.id = "btn-view-table";
+  btnTable.textContent = "Tabla";
+  btnTable.className = viewMode === "table" ? "active" : "";
+  btnTable.addEventListener("click", () => setViewMode("table"));
+
+  const btnJson = document.createElement("button");
+  btnJson.id = "btn-view-json";
+  btnJson.textContent = "JSON";
+  btnJson.className = viewMode === "json" ? "active" : "";
+  btnJson.addEventListener("click", () => setViewMode("json"));
+
+  wrap.appendChild(btnTable);
+  wrap.appendChild(btnJson);
+  return wrap;
+}
+
+// --------------------------------------------------------------------------
 // Ejecutar consulta
 // --------------------------------------------------------------------------
 async function runQuery() {
@@ -81,6 +117,7 @@ async function runQuery() {
     if (data.error) {
       showError(data.error);
     } else {
+      lastData = data;
       renderResult(data);
     }
   } catch (err) {
@@ -95,15 +132,18 @@ function showError(msg) {
   resultArea.innerHTML = '<p class="placeholder"><span class="big">🚫</span>Consulta rechazada.</p>';
 }
 
-function renderResult(data) {
-  const parts = [
-    '<span class="chip ok">✓ ' + data.rowcount + " fila(s)</span>",
-    '<span class="chip time">⏱ ' + data.elapsed_ms + " ms</span>",
-  ];
-  if (data.truncated) {
-    parts.push('<span class="chip warn">resultado recortado (límite de filas)</span>');
+function renderResult(data, skipMeta) {
+  if (!skipMeta) {
+    const parts = [
+      '<span class="chip ok">✓ ' + data.rowcount + " fila(s)</span>",
+      '<span class="chip time">⏱ ' + data.elapsed_ms + " ms</span>",
+    ];
+    if (data.truncated) {
+      parts.push('<span class="chip warn">resultado recortado (límite de filas)</span>');
+    }
+    resultMeta.innerHTML = parts.join(" ");
+    resultMeta.appendChild(buildViewToggle());
   }
-  resultMeta.innerHTML = parts.join(" ");
 
   if (data.rowcount === 0) {
     resultArea.innerHTML = '<p class="placeholder"><span class="big">∅</span>La consulta no devolvió filas.</p>';
@@ -121,7 +161,24 @@ function renderResult(data) {
     return;
   }
 
-  renderTable(data.columns, data.rows);
+  if (viewMode === "json") {
+    renderJson(data.columns, data.rows);
+  } else {
+    renderTable(data.columns, data.rows);
+  }
+}
+
+function renderJson(columns, rows) {
+  const objects = rows.map((row) => {
+    const obj = {};
+    columns.forEach((col, i) => { obj[col] = row[i]; });
+    return obj;
+  });
+  const pre = document.createElement("pre");
+  pre.className = "json-view";
+  pre.textContent = JSON.stringify(objects, null, 2);
+  resultArea.innerHTML = "";
+  resultArea.appendChild(pre);
 }
 
 function renderTable(columns, rows) {
@@ -200,6 +257,10 @@ async function checkHealth() {
 runBtn.addEventListener("click", runQuery);
 clearBtn.addEventListener("click", () => {
   sqlBox.value = "";
+  lastData = null;
+  viewMode = "table";
+  resultMeta.innerHTML = '<span class="hint" style="margin:0">Ejecuta una consulta para ver los resultados.</span>';
+  resultArea.innerHTML = '<p class="placeholder"><span class="big">🗒️</span>Los resultados aparecerán aquí.</p>';
   sqlBox.focus();
 });
 sqlBox.addEventListener("keydown", (e) => {
