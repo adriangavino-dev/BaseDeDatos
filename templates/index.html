@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Consultas SQL · BD Central</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <div class="logo">🍷</div>
+      <div>
+        <h1>Central · Consola de Consultas</h1>
+        <p class="subtitle">Base de Datos I &middot; explorador SQL de solo lectura</p>
+      </div>
+    </div>
+    <div class="status" id="db-status">Comprobando conexión&hellip;</div>
+  </header>
+
+  <main class="layout">
+    <!-- Panel lateral: esquema -->
+    <aside class="sidebar">
+      <section>
+        <h2>▦ Tablas</h2>
+        <p class="hint">Clic para ver columnas · clic en una columna para insertarla.</p>
+        <ul class="tables" id="table-list"></ul>
+      </section>
+    </aside>
+
+    <!-- Zona principal: consola SQL -->
+    <section class="content">
+      <div class="editor-wrap">
+        <label for="sql" class="editor-label">Consulta SQL</label>
+        <textarea id="sql" spellcheck="false"
+          placeholder="Escribe una consulta SELECT…&#10;Ej:  SELECT * FROM cliente LIMIT 10;"></textarea>
+        <div class="toolbar">
+          <button id="run-btn" class="btn-primary">▶ Ejecutar <span class="kbd">Ctrl + Enter</span></button>
+          <button id="clear-btn" class="btn-ghost">Limpiar</button>
+          <span class="guard-note">Solo lectura · SELECT / WITH / EXPLAIN</span>
+        </div>
+      </div>
+
+      <div class="result-card">
+        <div class="result-meta" id="result-meta">
+          <span class="hint" style="margin:0">Ejecuta una consulta para ver los resultados.</span>
+        </div>
+        <div class="result-area" id="result-area">
+          <p class="placeholder"><span class="big">🗒️</span>Los resultados aparecerán aquí.</p>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    window.SCHEMA = {{ schema_json | safe }};
+  </script>
+  <script src="{{ url_for('static', filename='app.js') }}"></script>
+</body>
+</html>
