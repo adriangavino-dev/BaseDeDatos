@@ -1,29 +1,3 @@
-"""
-Frontend de consultas - Proyecto Base de Datos I (Restaurante "Central")
-=========================================================================
-
-Pequeno servidor Flask que expone una caja de SQL libre para probar consultas
-contra la base `central` en PostgreSQL local.
-
-Seguridad anti-SQL-injection (defensa en capas):
-  1. Solo se aceptan sentencias de LECTURA: SELECT / WITH / EXPLAIN / TABLE /
-     VALUES / SHOW. Cualquier otra cosa se rechaza antes de tocar la BD.
-  2. Una sola sentencia por ejecucion: se prohibe encadenar con ';'
-     (evita el clasico  "... ; DROP TABLE ...").
-  3. Lista negra de funciones peligrosas (lectura de archivos, COPY, pg_sleep,
-     dblink, etc.) que un superusuario podria abusar.
-  4. CAPA REAL DE DEFENSA: cada consulta corre en una conexion marcada
-     `default_transaction_read_only = on` con `statement_timeout`. Aunque algo
-     se colara por las capas anteriores, PostgreSQL rechaza TODA escritura y
-     mata las consultas que tardan demasiado.
-  5. Se limita el numero de filas devueltas al navegador.
-
-Ejecutar:
-    pip install -r requirements.txt
-    python app.py
-    -> abrir http://127.0.0.1:5000
-"""
-
 import json
 import os
 import re
@@ -32,24 +6,18 @@ import time
 import psycopg2
 from flask import Flask, jsonify, render_template, request
 
-# --------------------------------------------------------------------------
-# Configuracion de conexion (override por variables de entorno si se quiere)
-# IMPORTANTE: host 127.0.0.1 -> pg_hba.conf usa 'trust' para esa IP, no pide
-# password. Por ::1 (IPv6) usaria scram-sha-256 y se colgaria pidiendo clave.
-# --------------------------------------------------------------------------
 DB_CONFIG = {
     "host": os.environ.get("PGHOST", "127.0.0.1"),
     "port": os.environ.get("PGPORT", "5432"),
     "dbname": os.environ.get("PGDATABASE", "central"),
     "user": os.environ.get("PGUSER", "postgres"),
-    "password": os.environ.get("PGPASSWORD", ""),  # vacio = trust
+    "password": os.environ.get("PGPASSWORD", ""),
 }
 
-MAX_ROWS = 1000          # filas maximas que se envian al navegador
-STATEMENT_TIMEOUT_MS = 15000  # 15s: corta consultas demasiado pesadas
-EXPERIMENT_TIMEOUT_MS = 90000  # 90s para el experimento (sin indice puede tardar)
+MAX_ROWS = 1000
+STATEMENT_TIMEOUT_MS = 15000
+EXPERIMENT_TIMEOUT_MS = 90000
 
-# Escala -> base de datos (cada volumen tiene su propia BD restaurada)
 SCALE_DBS = {
     "1k":   "central_1k",
     "10k":  "central_10k",
@@ -57,7 +25,6 @@ SCALE_DBS = {
     "1M":   "central_1m",
 }
 
-# Las 3 consultas del experimento (correlacionadas, promedio simple fijo).
 CONSULTAS = {
     "C1": {
         "nombre": "C1 · Clientes con gasto sobre el promedio",
@@ -100,16 +67,8 @@ CONSULTAS = {
 
 app = Flask(__name__)
 
-
-# --------------------------------------------------------------------------
-# Validacion / guardia anti-inyeccion
-# --------------------------------------------------------------------------
-
-# Verbos con los que puede empezar una sentencia de SOLO LECTURA.
 ALLOWED_STARTS = ("select", "with", "explain", "table", "values", "show")
 
-# Funciones / comandos peligrosos aunque aparezcan dentro de un SELECT.
-# El usuario 'postgres' es superusuario, asi que bloquearlos importa.
 DANGER_TOKENS = (
     "pg_read_file", "pg_read_binary_file", "pg_ls_dir", "pg_stat_file",
     "lo_import", "lo_export", "copy", "dblink", "pg_sleep",
@@ -118,14 +77,12 @@ DANGER_TOKENS = (
 
 
 def strip_sql_comments(sql: str) -> str:
-    """Quita comentarios -- y /* */ para que la validacion no se enganhe."""
     sql = re.sub(r"/\*.*?\*/", " ", sql, flags=re.DOTALL)
     sql = re.sub(r"--[^\n]*", " ", sql)
     return sql
 
 
 def validate_sql(raw: str):
-    """Devuelve (sql_limpio, None) si es valida, o (None, mensaje_error)."""
     if not raw or not raw.strip():
         return None, "La consulta esta vacia."
 
@@ -133,25 +90,18 @@ def validate_sql(raw: str):
     if not cleaned:
         return None, "La consulta solo contiene comentarios."
 
-    # Quitar un unico ';' final (se permite por comodidad).
     cleaned = cleaned.rstrip().rstrip(";").rstrip()
 
-    # 1) Una sola sentencia: ya no debe quedar ningun ';'.
     if ";" in cleaned:
         return None, ("Solo se permite UNA sentencia. Quita los ';' intermedios "
                       "(no se pueden encadenar consultas).")
 
-    # 2) Debe empezar con un verbo de lectura.
     first_word = re.match(r"\s*([a-zA-Z]+)", cleaned)
     if not first_word or first_word.group(1).lower() not in ALLOWED_STARTS:
         return None, ("Solo se permiten consultas de LECTURA "
                       "(SELECT, WITH, EXPLAIN, TABLE, VALUES, SHOW). "
                       "Esta herramienta es de solo lectura.")
 
-    # 2b) EXPLAIN no puede traer ANALYZE sobre algo que escriba; el modo
-    #     READ ONLY ya lo bloquea, pero damos un mensaje claro igual.
-
-    # 3) Lista negra de tokens peligrosos (como palabra completa).
     lowered = cleaned.lower()
     for tok in DANGER_TOKENS:
         if re.search(r"\b" + re.escape(tok) + r"\b", lowered):
@@ -160,16 +110,7 @@ def validate_sql(raw: str):
     return cleaned, None
 
 
-# --------------------------------------------------------------------------
-# Acceso a la base de datos (conexion read-only por peticion)
-# --------------------------------------------------------------------------
-
 def get_readonly_connection():
-    """Conexion nueva forzada a SOLO LECTURA con timeout de sentencia.
-
-    Las opciones se aplican como defaults de sesion, asi que TODA transaccion
-    en esta conexion es read-only: PostgreSQL rechaza INSERT/UPDATE/DELETE/DDL.
-    """
     options = (
         f"-c default_transaction_read_only=on "
         f"-c statement_timeout={STATEMENT_TIMEOUT_MS} "
@@ -179,8 +120,6 @@ def get_readonly_connection():
 
 
 def get_experiment_connection(dbname: str):
-    """Conexion SOLO LECTURA a una base de un volumen concreto, con timeout
-    mas amplio (el escenario sin indice puede tardar en 100k/1M)."""
     options = (
         f"-c default_transaction_read_only=on "
         f"-c statement_timeout={EXPERIMENT_TIMEOUT_MS} "
@@ -192,7 +131,6 @@ def get_experiment_connection(dbname: str):
 
 
 def run_query(sql: str):
-    """Ejecuta la consulta validada y devuelve un dict para el frontend."""
     conn = None
     try:
         conn = get_readonly_connection()
@@ -202,7 +140,6 @@ def run_query(sql: str):
             elapsed_ms = (time.perf_counter() - start) * 1000
 
             if cur.description is None:
-                # No deberia pasar con lecturas, pero por si acaso.
                 return {"columns": [], "rows": [], "rowcount": 0,
                         "truncated": False, "elapsed_ms": round(elapsed_ms, 1)}
 
@@ -211,11 +148,10 @@ def run_query(sql: str):
             truncated = len(rows) > MAX_ROWS
             rows = rows[:MAX_ROWS]
 
-            # Convertir todo a str-friendly (Decimal, date, None -> JSON ok).
             data = [[(None if v is None else _as_cell(v)) for v in row]
                     for row in rows]
 
-        conn.rollback()  # nada que confirmar; cerramos limpio
+        conn.rollback()
         return {
             "columns": columns,
             "rows": data,
@@ -224,7 +160,6 @@ def run_query(sql: str):
             "elapsed_ms": round(elapsed_ms, 1),
         }
     except psycopg2.Error as e:
-        # Mensaje de PostgreSQL (incluye el "read-only transaction" si aplica).
         msg = (e.diag.message_primary if e.diag and e.diag.message_primary
                else str(e)).strip()
         return {"error": msg}
@@ -234,19 +169,11 @@ def run_query(sql: str):
 
 
 def _as_cell(value):
-    """Normaliza un valor para JSON manteniendo numeros nativos."""
     if isinstance(value, (int, float, bool)):
         return value
     return str(value)
 
 
-# --------------------------------------------------------------------------
-# Rutas
-# --------------------------------------------------------------------------
-
-# --------------------------------------------------------------------------
-# Metadatos para el panel lateral (esquema resumido + consultas de ejemplo)
-# --------------------------------------------------------------------------
 SCHEMA = {
     "cliente": ["id_cliente", "dni", "nombre", "apellido", "telefono", "email",
                 "fecha_registro"],
@@ -285,7 +212,6 @@ SCHEMA = {
 
 @app.route("/")
 def index():
-    # Metadatos de las consultas para el panel del experimento (sin el SQL).
     consultas_meta = {
         cid: {k: v for k, v in q.items() if k != "sql"}
         for cid, q in CONSULTAS.items()
@@ -300,8 +226,6 @@ def index():
 
 @app.route("/api/experiment", methods=["POST"])
 def api_experiment():
-    """Corre una de las 3 consultas del experimento con EXPLAIN (ANALYZE),
-    en la base del volumen elegido, con o sin uso de indices."""
     p = request.get_json(silent=True) or {}
     cid = p.get("consulta")
     escala = p.get("escala")
@@ -319,7 +243,6 @@ def api_experiment():
         conn = get_experiment_connection(dbname)
         with conn.cursor() as cur:
             if not con_indice:
-                # No borramos el indice: solo desactivamos su uso en esta sesion.
                 cur.execute("SET enable_indexscan=off; "
                             "SET enable_bitmapscan=off; "
                             "SET enable_indexonlyscan=off;")
@@ -377,7 +300,6 @@ def api_query():
 
 @app.route("/api/health")
 def health():
-    """Comprueba que la BD responde (util para diagnosticar conexion)."""
     try:
         conn = get_readonly_connection()
         with conn.cursor() as cur:

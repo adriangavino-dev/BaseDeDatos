@@ -7,9 +7,6 @@ const clearBtn = $("#clear-btn");
 const resultArea = $("#result-area");
 const resultMeta = $("#result-meta");
 
-// --------------------------------------------------------------------------
-// Panel lateral: esquema de tablas
-// --------------------------------------------------------------------------
 function buildSchema() {
   const list = $("#table-list");
   const schema = window.SCHEMA || {};
@@ -56,9 +53,6 @@ function insertAtCursor(text) {
   sqlBox.focus();
 }
 
-// --------------------------------------------------------------------------
-// Vista: tabla vs JSON
-// --------------------------------------------------------------------------
 let lastData = null;
 let viewMode = "table";
 
@@ -92,9 +86,6 @@ function buildViewToggle() {
   return wrap;
 }
 
-// --------------------------------------------------------------------------
-// Ejecutar consulta
-// --------------------------------------------------------------------------
 async function runQuery() {
   const sql = sqlBox.value.trim();
   if (!sql) {
@@ -150,7 +141,6 @@ function renderResult(data, skipMeta) {
     return;
   }
 
-  // EXPLAIN -> una sola columna "QUERY PLAN": mostrar como texto plano.
   if (data.columns.length === 1 && /query plan/i.test(data.columns[0])) {
     const text = data.rows.map((r) => r[0]).join("\n");
     const pre = document.createElement("pre");
@@ -229,9 +219,6 @@ function escapeHtml(s) {
   return d.innerHTML;
 }
 
-// --------------------------------------------------------------------------
-// Estado de la conexión
-// --------------------------------------------------------------------------
 async function checkHealth() {
   const el = $("#db-status");
   try {
@@ -251,9 +238,6 @@ async function checkHealth() {
   }
 }
 
-// --------------------------------------------------------------------------
-// Eventos
-// --------------------------------------------------------------------------
 runBtn.addEventListener("click", runQuery);
 clearBtn.addEventListener("click", () => {
   sqlBox.value = "";
@@ -270,9 +254,6 @@ sqlBox.addEventListener("keydown", (e) => {
   }
 });
 
-// ==========================================================================
-// EXPERIMENTO DE ÍNDICES
-// ==========================================================================
 let expScale = (window.SCALES && window.SCALES[0]) || "1k";
 
 function buildExperiment() {
@@ -281,7 +262,6 @@ function buildExperiment() {
   const sel = $("#exp-consulta");
   if (!sel) return;
 
-  // Dropdown de consultas
   Object.keys(consultas).forEach((cid) => {
     const opt = document.createElement("option");
     opt.value = cid;
@@ -289,7 +269,6 @@ function buildExperiment() {
     sel.appendChild(opt);
   });
 
-  // Tabs de escala
   const tabs = $("#scale-tabs");
   scales.forEach((s) => {
     const b = document.createElement("button");

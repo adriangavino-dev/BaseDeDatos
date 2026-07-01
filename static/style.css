@@ -32,7 +32,6 @@ body {
   min-height: 100vh;
 }
 
-/* ---------- Topbar ---------- */
 .topbar {
   display: flex;
   align-items: center;
@@ -79,7 +78,6 @@ body {
 .status.err { color: var(--red); }
 .status.err::before { background: var(--red); box-shadow: 0 0 0 3px rgba(192,57,43,.15); }
 
-/* ---------- Layout ---------- */
 .layout {
   flex: 1;
   display: grid;
@@ -89,7 +87,6 @@ body {
   min-height: 0;
 }
 
-/* ---------- Sidebar ---------- */
 .sidebar {
   background: var(--card);
   border: 1px solid var(--line);
@@ -137,7 +134,6 @@ body {
 .col-chip { cursor: pointer; border-radius: 4px; padding: 1px 3px; }
 .col-chip:hover { color: var(--wine); background: var(--card-soft); }
 
-/* ---------- Content ---------- */
 .content {
   display: flex;
   flex-direction: column;
@@ -229,7 +225,6 @@ body {
   display: inline-flex; align-items: center; gap: 6px;
 }
 
-/* ---------- Results ---------- */
 .result-card {
   flex: 1;
   display: flex; flex-direction: column;
@@ -293,7 +288,6 @@ table.result tbody tr:hover td { background: rgba(193,73,90,.08); }
 table.result td.null { color: #6b5f54; font-style: italic; }
 .rownum { color: var(--muted); text-align: right; user-select: none; font-variant-numeric: tabular-nums; }
 
-/* ---------- View toggle (Tabla / JSON) ---------- */
 .view-toggle {
   margin-left: auto;
   display: inline-flex;
@@ -342,7 +336,6 @@ pre.explain {
   color: var(--ink);
 }
 
-/* scrollbars */
 .sidebar::-webkit-scrollbar, .result-area::-webkit-scrollbar { width: 10px; height: 10px; }
 .sidebar::-webkit-scrollbar-thumb, .result-area::-webkit-scrollbar-thumb {
   background: var(--line); border-radius: 10px; border: 2px solid var(--card);
@@ -355,7 +348,6 @@ pre.explain {
   .layout { padding: 4px 16px 20px; }
 }
 
-/* ===================== EXPERIMENTO DE ÍNDICES ===================== */
 .exp-card {
   background: var(--card);
   border: 1px solid var(--line);
