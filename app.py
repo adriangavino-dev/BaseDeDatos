@@ -47,6 +47,56 @@ DB_CONFIG = {
 
 MAX_ROWS = 1000          # filas maximas que se envian al navegador
 STATEMENT_TIMEOUT_MS = 15000  # 15s: corta consultas demasiado pesadas
+EXPERIMENT_TIMEOUT_MS = 90000  # 90s para el experimento (sin indice puede tardar)
+
+# Escala -> base de datos (cada volumen tiene su propia BD restaurada)
+SCALE_DBS = {
+    "1k":   "central_1k",
+    "10k":  "central_10k",
+    "100k": "central_100k",
+    "1M":   "central_1m",
+}
+
+# Las 3 consultas del experimento (correlacionadas, promedio simple fijo).
+CONSULTAS = {
+    "C1": {
+        "nombre": "C1 · Clientes con gasto sobre el promedio",
+        "descripcion": "Clientes cuya suma de prepagos supera el promedio. "
+                       "Subconsulta correlacionada sobre RESERVA por id_cliente.",
+        "indice": "idx_reserva_cliente_prepago (btree)",
+        "sql": ("SELECT c.id_cliente, c.nombre,\n"
+                "       (SELECT COALESCE(SUM(r.prepago),0) FROM RESERVA r WHERE r.id_cliente=c.id_cliente) AS gasto\n"
+                "FROM CLIENTE c\n"
+                "WHERE (SELECT COALESCE(SUM(r.prepago),0) FROM RESERVA r WHERE r.id_cliente=c.id_cliente)\n"
+                "      > (SELECT AVG(sub.g) FROM (SELECT SUM(prepago) AS g FROM RESERVA GROUP BY id_cliente) sub)\n"
+                "ORDER BY gasto DESC"),
+    },
+    "C2": {
+        "nombre": "C2 · Mesas con ingreso sobre el promedio",
+        "descripcion": "Mesas cuyo ingreso facturado supera el promedio. "
+                       "Subconsulta correlacionada que une FACTURA y PEDIDO por id_mesa.",
+        "indice": "idx_pedido_mesa (hash)",
+        "sql": ("SELECT m.id_mesa, m.numero,\n"
+                "       (SELECT COALESCE(SUM(f.total),0) FROM FACTURA f JOIN PEDIDO p ON p.id_pedido=f.id_pedido WHERE p.id_mesa=m.id_mesa) AS ingreso\n"
+                "FROM MESA m\n"
+                "WHERE (SELECT COALESCE(SUM(f.total),0) FROM FACTURA f JOIN PEDIDO p ON p.id_pedido=f.id_pedido WHERE p.id_mesa=m.id_mesa)\n"
+                "      > (SELECT AVG(sub.ing) FROM (SELECT SUM(f.total) AS ing FROM FACTURA f JOIN PEDIDO p ON p.id_pedido=f.id_pedido GROUP BY p.id_mesa) sub)\n"
+                "ORDER BY ingreso DESC"),
+    },
+    "C3": {
+        "nombre": "C3 · Meseros con pedidos sobre el promedio",
+        "descripcion": "Meseros cuyo numero de pedidos supera el promedio. "
+                       "Subconsulta correlacionada que cuenta PEDIDO por id_empleado.",
+        "indice": "idx_pedido_empleado (hash)",
+        "sql": ("SELECT em.id_empleado, em.nombre,\n"
+                "       (SELECT COUNT(*) FROM PEDIDO p WHERE p.id_empleado=em.id_empleado) AS pedidos\n"
+                "FROM EMPLEADO em\n"
+                "JOIN MESERO me ON me.id_empleado=em.id_empleado\n"
+                "WHERE (SELECT COUNT(*) FROM PEDIDO p WHERE p.id_empleado=em.id_empleado)\n"
+                "      > (SELECT AVG(sub.c) FROM (SELECT COUNT(*) AS c FROM PEDIDO GROUP BY id_empleado) sub)\n"
+                "ORDER BY pedidos DESC"),
+    },
+}
 
 app = Flask(__name__)
 
@@ -126,6 +176,19 @@ def get_readonly_connection():
         f"-c idle_in_transaction_session_timeout={STATEMENT_TIMEOUT_MS}"
     )
     return psycopg2.connect(options=options, connect_timeout=5, **DB_CONFIG)
+
+
+def get_experiment_connection(dbname: str):
+    """Conexion SOLO LECTURA a una base de un volumen concreto, con timeout
+    mas amplio (el escenario sin indice puede tardar en 100k/1M)."""
+    options = (
+        f"-c default_transaction_read_only=on "
+        f"-c statement_timeout={EXPERIMENT_TIMEOUT_MS} "
+        f"-c idle_in_transaction_session_timeout={EXPERIMENT_TIMEOUT_MS}"
+    )
+    cfg = dict(DB_CONFIG)
+    cfg["dbname"] = dbname
+    return psycopg2.connect(options=options, connect_timeout=5, **cfg)
 
 
 def run_query(sql: str):
@@ -222,10 +285,80 @@ SCHEMA = {
 
 @app.route("/")
 def index():
+    # Metadatos de las consultas para el panel del experimento (sin el SQL).
+    consultas_meta = {
+        cid: {k: v for k, v in q.items() if k != "sql"}
+        for cid, q in CONSULTAS.items()
+    }
     return render_template(
         "index.html",
         schema_json=json.dumps(SCHEMA),
+        consultas_json=json.dumps(consultas_meta),
+        scales_json=json.dumps(list(SCALE_DBS.keys())),
     )
+
+
+@app.route("/api/experiment", methods=["POST"])
+def api_experiment():
+    """Corre una de las 3 consultas del experimento con EXPLAIN (ANALYZE),
+    en la base del volumen elegido, con o sin uso de indices."""
+    p = request.get_json(silent=True) or {}
+    cid = p.get("consulta")
+    escala = p.get("escala")
+    con_indice = bool(p.get("con_indice"))
+
+    if cid not in CONSULTAS:
+        return jsonify({"error": "Consulta desconocida."}), 400
+    if escala not in SCALE_DBS:
+        return jsonify({"error": "Escala desconocida."}), 400
+
+    q = CONSULTAS[cid]
+    dbname = SCALE_DBS[escala]
+    conn = None
+    try:
+        conn = get_experiment_connection(dbname)
+        with conn.cursor() as cur:
+            if not con_indice:
+                # No borramos el indice: solo desactivamos su uso en esta sesion.
+                cur.execute("SET enable_indexscan=off; "
+                            "SET enable_bitmapscan=off; "
+                            "SET enable_indexonlyscan=off;")
+            cur.execute("EXPLAIN (ANALYZE, FORMAT JSON) " + q["sql"])
+            raw = cur.fetchone()[0]
+            if isinstance(raw, str):
+                raw = json.loads(raw)
+            plan = raw[0]
+        conn.rollback()
+
+        return jsonify({
+            "consulta": cid,
+            "nombre": q["nombre"],
+            "escala": escala,
+            "db": dbname,
+            "con_indice": con_indice,
+            "indice_nombre": q["indice"],
+            "planning_ms": round(plan.get("Planning Time"), 3),
+            "execution_ms": round(plan.get("Execution Time"), 3),
+            "rows": plan.get("Plan", {}).get("Actual Rows"),
+            "sql": q["sql"] + ";",
+        })
+    except psycopg2.OperationalError as e:
+        msg = str(e).strip()
+        if "does not exist" in msg or "no existe" in msg:
+            msg = (f"La base '{dbname}' no existe todavia. Aun se estan "
+                   f"construyendo los 4 volumenes.")
+        return jsonify({"error": msg}), 400
+    except psycopg2.Error as e:
+        msg = (e.diag.message_primary if e.diag and e.diag.message_primary
+               else str(e)).strip()
+        low = msg.lower()
+        if "timeout" in low or "statement" in low or "cancel" in low:
+            msg = ("La consulta supero el tiempo limite (sin indice no escala a "
+                   "este volumen). Prueba con indice o un volumen menor.")
+        return jsonify({"error": msg}), 400
+    finally:
+        if conn is not None:
+            conn.close()
 
 
 @app.route("/api/query", methods=["POST"])

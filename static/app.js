@@ -104,7 +104,7 @@ async function runQuery() {
 
   runBtn.disabled = true;
   resultMeta.innerHTML = '<span class="hint" style="margin:0">Ejecutando&hellip;</span>';
-  resultArea.innerHTML = '<p class="placeholder"><span class="big">⏳</span>Ejecutando consulta&hellip;</p>';
+  resultArea.innerHTML = '<p class="placeholder">Ejecutando consulta&hellip;</p>';
 
   try {
     const resp = await fetch("/api/query", {
@@ -128,15 +128,15 @@ async function runQuery() {
 }
 
 function showError(msg) {
-  resultMeta.innerHTML = '<span class="err-msg">⚠️ ' + escapeHtml(msg) + "</span>";
-  resultArea.innerHTML = '<p class="placeholder"><span class="big">🚫</span>Consulta rechazada.</p>';
+  resultMeta.innerHTML = '<span class="err-msg">' + escapeHtml(msg) + "</span>";
+  resultArea.innerHTML = '<p class="placeholder">Consulta rechazada.</p>';
 }
 
 function renderResult(data, skipMeta) {
   if (!skipMeta) {
     const parts = [
-      '<span class="chip ok">✓ ' + data.rowcount + " fila(s)</span>",
-      '<span class="chip time">⏱ ' + data.elapsed_ms + " ms</span>",
+      '<span class="chip ok">' + data.rowcount + " fila(s)</span>",
+      '<span class="chip time">' + data.elapsed_ms + " ms</span>",
     ];
     if (data.truncated) {
       parts.push('<span class="chip warn">resultado recortado (límite de filas)</span>');
@@ -259,8 +259,8 @@ clearBtn.addEventListener("click", () => {
   sqlBox.value = "";
   lastData = null;
   viewMode = "table";
-  resultMeta.innerHTML = '<span class="hint" style="margin:0">Ejecuta una consulta para ver los resultados.</span>';
-  resultArea.innerHTML = '<p class="placeholder"><span class="big">🗒️</span>Los resultados aparecerán aquí.</p>';
+  resultMeta.innerHTML = "";
+  resultArea.innerHTML = "";
   sqlBox.focus();
 });
 sqlBox.addEventListener("keydown", (e) => {
@@ -270,5 +270,105 @@ sqlBox.addEventListener("keydown", (e) => {
   }
 });
 
+// ==========================================================================
+// EXPERIMENTO DE ÍNDICES
+// ==========================================================================
+let expScale = (window.SCALES && window.SCALES[0]) || "1k";
+
+function buildExperiment() {
+  const consultas = window.CONSULTAS || {};
+  const scales = window.SCALES || [];
+  const sel = $("#exp-consulta");
+  if (!sel) return;
+
+  // Dropdown de consultas
+  Object.keys(consultas).forEach((cid) => {
+    const opt = document.createElement("option");
+    opt.value = cid;
+    opt.textContent = consultas[cid].nombre;
+    sel.appendChild(opt);
+  });
+
+  // Tabs de escala
+  const tabs = $("#scale-tabs");
+  scales.forEach((s) => {
+    const b = document.createElement("button");
+    b.className = "scale-tab" + (s === expScale ? " active" : "");
+    b.textContent = s;
+    b.addEventListener("click", () => {
+      expScale = s;
+      document.querySelectorAll(".scale-tab").forEach((t) =>
+        t.classList.toggle("active", t.textContent === s));
+    });
+    tabs.appendChild(b);
+  });
+
+  function syncConsulta() {
+    const q = consultas[sel.value];
+    $("#exp-desc").textContent = q.descripcion + "  →  Índice: " + q.indice;
+  }
+  sel.addEventListener("change", syncConsulta);
+  syncConsulta();
+
+  $("#exp-run").addEventListener("click", runExperiment);
+}
+
+async function runExperiment() {
+  const btn = $("#exp-run");
+  const out = $("#exp-result");
+  const body = {
+    consulta: $("#exp-consulta").value,
+    escala: expScale,
+    con_indice: $("#exp-indice").checked,
+  };
+  btn.disabled = true;
+  out.innerHTML = '<p class="placeholder">Ejecutando ' +
+    body.consulta + ' · escala ' + body.escala +
+    (body.con_indice ? ' · con índice…' : ' · sin índice (puede tardar)…') + '</p>';
+
+  try {
+    const resp = await fetch("/api/experiment", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const data = await resp.json();
+    if (data.error) {
+      out.innerHTML = '<div class="exp-error">' + escapeHtml(data.error) + "</div>";
+    } else {
+      renderExperiment(data);
+    }
+  } catch (err) {
+    out.innerHTML = '<div class="exp-error">No se pudo contactar al servidor: ' +
+      escapeHtml(err.message) + "</div>";
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+function renderExperiment(d) {
+  const on = d.con_indice;
+  const html = `
+    <div class="exp-metrics">
+      <div class="metric-main">
+        <div class="metric-num">${d.execution_ms} <span>ms</span></div>
+        <div class="metric-cap">EXECUTION TIME</div>
+      </div>
+      <div class="metric-grid">
+        <div><span class="ml">Planning</span><span class="mv">${d.planning_ms} ms</span></div>
+        <div><span class="ml">Índice</span><span class="mv badge ${on ? 'on' : 'off'}">${on ? 'ON' : 'OFF'}</span></div>
+        <div><span class="ml">Filas</span><span class="mv">${d.rows}</span></div>
+        <div><span class="ml">Base</span><span class="mv">${escapeHtml(d.db)}</span></div>
+      </div>
+    </div>
+    <div class="exp-sub">${escapeHtml(d.consulta)} · escala ${escapeHtml(d.escala)} · ${on ? 'con índice (' + escapeHtml(d.indice_nombre) + ')' : 'sin índice'}</div>
+    <div class="exp-sqlwrap">
+      <div class="exp-sqlhead">SQL EJECUTADO</div>
+      <pre class="exp-sql">${escapeHtml(d.sql)}</pre>
+    </div>`;
+  $("#exp-result").innerHTML = html;
+}
+
 buildSchema();
+buildExperiment();
 checkHealth();

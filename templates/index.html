@@ -9,10 +9,10 @@
 <body>
   <header class="topbar">
     <div class="brand">
-      <div class="logo">🍷</div>
+      <div class="logo"></div>
       <div>
         <h1>Central · Consola de Consultas</h1>
-        <p class="subtitle">Base de Datos I &middot; explorador SQL de solo lectura</p>
+        <p class="subtitle">Base de Datos I</p>
       </div>
     </div>
     <div class="status" id="db-status">Comprobando conexión&hellip;</div>
@@ -23,15 +23,39 @@
     <aside class="sidebar">
       <section>
         <h2>▦ Tablas</h2>
-        <p class="hint">Clic para ver columnas · clic en una columna para insertarla.</p>
         <ul class="tables" id="table-list"></ul>
       </section>
     </aside>
 
-    <!-- Zona principal: consola SQL -->
+    <!-- Zona principal -->
     <section class="content">
+
+      <!-- ============ EXPERIMENTO DE ÍNDICES ============ -->
+      <div class="exp-card">
+        <div class="exp-head">
+          <h2>Experimento de índices</h2>
+          <div class="scale-tabs" id="scale-tabs"></div>
+        </div>
+
+        <div class="exp-controls">
+          <label class="field grow">
+            <span>Consulta</span>
+            <select id="exp-consulta"></select>
+          </label>
+          <label class="switch">
+            <input type="checkbox" id="exp-indice" checked>
+            <span>con índice</span>
+          </label>
+          <button id="exp-run" class="btn-primary">▶ Ejecutar</button>
+        </div>
+        <p class="exp-desc" id="exp-desc"></p>
+
+        <div class="exp-result" id="exp-result"></div>
+      </div>
+
+      <!-- ============ CONSOLA SQL LIBRE ============ -->
       <div class="editor-wrap">
-        <label for="sql" class="editor-label">Consulta SQL</label>
+        <label for="sql" class="editor-label">Consola SQL (solo lectura)</label>
         <textarea id="sql" spellcheck="false"
           placeholder="Escribe una consulta SELECT…&#10;Ej:  SELECT * FROM cliente LIMIT 10;"></textarea>
         <div class="toolbar">
@@ -42,18 +66,16 @@
       </div>
 
       <div class="result-card">
-        <div class="result-meta" id="result-meta">
-          <span class="hint" style="margin:0">Ejecuta una consulta para ver los resultados.</span>
-        </div>
-        <div class="result-area" id="result-area">
-          <p class="placeholder"><span class="big">🗒️</span>Los resultados aparecerán aquí.</p>
-        </div>
+        <div class="result-meta" id="result-meta"></div>
+        <div class="result-area" id="result-area"></div>
       </div>
     </section>
   </main>
 
   <script>
     window.SCHEMA = {{ schema_json | safe }};
+    window.CONSULTAS = {{ consultas_json | safe }};
+    window.SCALES = {{ scales_json | safe }};
   </script>
   <script src="{{ url_for('static', filename='app.js') }}"></script>
 </body>
